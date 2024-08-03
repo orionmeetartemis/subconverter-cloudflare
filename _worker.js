@@ -5775,6 +5775,12 @@ function stringify3(value, replacer, options) {
     return new Document(value, _replacer, options).toString(options);
 }
 
+function getKvnamspace(env) {
+    if (Object.prototype.toString.call(env.SUB_BUCKET) === '[object Object]') {
+        return env.SUB_BUCKET;
+    }
+    return env[env.SUB_BUCKET];
+}
 // worker.js
 var dump = stringify3;
 var load = parse;
@@ -5785,20 +5791,17 @@ var src_default = {
         const frontendUrl =
             env.FRONTEND || `https://raw.githubusercontent.com/orionmeetartemis/subconverter-cloudflare/main/index.html?t=${Date.now()}`;
 
+        let backend = env.BACKEND || 'https://url.v1.mk';
 
-        if(env.SUB_BUCKET === undefined) {
-            return new Response('环境变量SUB_BUCKET未设置', { status: 400 });
-        }
-
-        const SUB_BUCKET = env[env.SUB_BUCKET];
-        if(SUB_BUCKET === undefined) {
-            return new Response(`kv绑定错误，env SUB_BUCKET is ${env.SUB_BUCKET}`, { status: 400 });
+        const SUB_BUCKET = getKvnamspace(env);
+        if (SUB_BUCKET === undefined) {
+            return new Response(`kv绑定错误,env SUB_BUCKET is ${env.SUB_BUCKET || '空'}`, { status: 400 });
         }
 
         const REMOTE_CONFIG = env.REMOTE_CONFIG || '';
         const LOCK_CONFIG = env.LOCK_BACKEND || 'true';
         const remoteConfig = REMOTE_CONFIG === '' ? [] : getRemoteConfig(REMOTE_CONFIG);
-        let backend = env.BACKEND.replace(/(https?:\/\/[^/]+).*$/, '$1');
+        backend = backend.replace(/(https?:\/\/[^/]+).*$/, '$1');
         const subDir = 'subscription';
         const pathSegments = url.pathname.split('/').filter(segment => segment.length > 0);
         if (pathSegments.length === 0) {
@@ -5867,7 +5870,7 @@ var src_default = {
                 } else {
                     parsedObj = parseData(url2);
                 }
-                if (/^(ssr?|vmess1?|trojan|vless|hysteria):\/\//.test(url2)) {
+                if (/^(ssr?|vmess1?|trojan|vless|hysteria|hysteria2):\/\//.test(url2)) {
                     const newLink = replaceInUri(url2, replacements, false);
                     if (newLink) replacedURIs.push(newLink);
                     continue;
@@ -5957,6 +5960,8 @@ function replaceInUri(link, replacements, isRecovery) {
             return replaceTrojan(link, replacements, isRecovery);
         case link.startsWith('hysteria://'):
             return replaceHysteria(link, replacements);
+        case link.startsWith("hysteria2://"):
+            return replaceHysteria2(link, replacements, isRecovery);
         default:
             return;
     }
@@ -6115,6 +6120,24 @@ function replaceHysteria(link, replacements) {
     const randomDomain = generateRandomStr(12) + '.com';
     replacements[randomDomain] = server;
     return link.replace(server, randomDomain);
+}
+
+function replaceHysteria2(link, replacements,isRecovery) {
+    const randomUUID = generateRandomUUID();
+    const randomDomain = generateRandomStr(10) + ".com";
+    const regexMatch = link.match(/(hysteria2):\/\/(.*)@(.*?):/);
+    if (!regexMatch) {
+        return;
+    }
+    const [, , uuid, server] = regexMatch;
+    replacements[randomDomain] = server;
+    replacements[randomUUID] = uuid;
+    const regex = new RegExp(`${uuid}|${server}`, "g");
+    if (isRecovery) {
+        return link.replace(regex, (match) => cReplace(match, uuid, replacements[uuid], server, replacements[server]));
+    } else {
+        return link.replace(regex, (match) => cReplace(match, uuid, randomUUID, server, randomDomain));
+    }
 }
 function replaceYAML(yamlObj, replacements) {
     if (!yamlObj.proxies) {
